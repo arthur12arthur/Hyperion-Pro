@@ -1,0 +1,71 @@
+# ============================================================
+# HYPERION PRO v1 — Sources de données par marché
+# ============================================================
+
+# --- Marché principal : LONAB Burkina Faso ---
+lonab:
+  pdf:
+    url: "${LONAB_PDF_URL}"
+    fallback_path: "data/raw/programme_lonab.pdf"
+  odds:
+    - name: "lonab_officiel"
+      url: "https://www.lonab.bf"
+      enabled: true
+      weight: 1.0
+  pronostics:
+    - name: "turf_afrique"
+      url: "https://www.turfafrique.com"
+      enabled: true
+      weight: 0.7
+    - name: "geny_courses"
+      url: "https://www.geny.com"
+      enabled: true
+      weight: 0.8
+
+# --- Marché secondaire : PMU France (pour croiser historiques) ---
+pmu:
+  enabled: false
+  odds:
+    - name: "pmu_officiel"
+      url: "https://www.pmu.fr"
+      enabled: false
+      weight: 0.9
+  pronostics:
+    - name: "geny"
+      url: "https://www.geny.com"
+      enabled: false
+      weight: 0.8
+    - name: "turf_fr"
+      url: "https://www.turf-fr.com"
+      enabled: false
+      weight: 0.6
+
+# --- Sources historiques chevaux ---
+historical:
+  - name: "equibase"
+    url: "https://www.equibase.com"
+    enabled: true
+    weight: 0.9
+  - name: "racingpost"
+    url: "https://www.racingpost.com"
+    enabled: true
+    weight: 0.85
+
+# --- Sources sentiment / social ---
+sentiment:
+  - name: "telegram_groups"
+    enabled: true
+    keywords: ["LONAB", "courses Burkina", "pronostic"]
+    weight: 0.5
+  - name: "forums_turf"
+    url: "https://www.cheval-fr.com/forum"
+    enabled: true
+    weight: 0.4
+
+# --- Poids globaux par type de source ---
+source_weights:
+  official_pdf: 1.0
+  live_odds: 0.9
+  historical_data: 0.85
+  expert_pronostics: 0.7
+  sentiment: 0.4
