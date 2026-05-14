@@ -1,0 +1,98 @@
+# ============================================================
+# HYPERION PRO v1 — GitHub Actions : Run quotidien automatique
+# .github/workflows/daily-run.yml
+# ============================================================
+
+name: Hyperion Pro — Run Quotidien
+
+on:
+  # Declenchement automatique tous les jours a 6h00 UTC (7h00 Ouagadougou)
+  schedule:
+    - cron: "0 6 * * *"
+
+  # Declenchement manuel depuis l'interface GitHub
+  workflow_dispatch:
+    inputs:
+      pdf_url:
+        description: "URL du PDF LONAB (optionnel)"
+        required: false
+        default: ""
+      no_web:
+        description: "Desactiver la recherche web (true/false)"
+        required: false
+        default: "false"
+      dry_run:
+        description: "Dry run sans envoi Telegram (true/false)"
+        required: false
+        default: "false"
+
+jobs:
+  hyperion-run:
+    name: Pipeline Hyperion Pro v1
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      # 1. Recuperer le code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Configurer Python
+      - name: Setup Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      # 3. Installer les dependances
+      - name: Installer les dependances
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+
+      # 4. Creer les dossiers necessaires
+      - name: Preparer les dossiers
+        run: |
+          mkdir -p logs data/raw data/processed data/historical reports
+
+      # 5. Lancer le pipeline Hyperion
+      - name: Lancer Hyperion Pro v1
+        env:
+          GEMINI_API_KEY:       ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_BOT_TOKEN:   ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:     ${{ secrets.TELEGRAM_CHAT_ID }}
+          LONAB_PDF_URL:        ${{ secrets.LONAB_PDF_URL || github.event.inputs.pdf_url }}
+        run: |
+          NO_WEB_FLAG=""
+          DRY_RUN_FLAG=""
+
+          if [ "${{ github.event.inputs.no_web }}" = "true" ]; then
+            NO_WEB_FLAG="--no-web"
+          fi
+
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+
+          python scripts/daily_run.py $NO_WEB_FLAG $DRY_RUN_FLAG
+
+      # 6. Sauvegarder les logs en cas d'echec
+      - name: Sauvegarder les logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hyperion-logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 7
+
+      # 7. Notifier en cas d'echec
+      - name: Notifier echec Telegram
+        if: failure()
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          curl -s -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" \
+            -d chat_id="${TELEGRAM_CHAT_ID}" \
+            -d text="HYPERION PRO — ECHEC du pipeline quotidien. Verifier les logs GitHub Actions." \
+            -d parse_mode="Markdown"
