@@ -24,6 +24,60 @@ pipeline:
   run_hades: true
   min_confidence_score: 2
 
+# --- Sources de données hippiques françaises ---
+sources:
+  # Sites pour l'historique des chevaux (PMU France)
+  historical:
+    - name: "turfoo"
+      url: "https://www.turfoo.fr"
+      search_url: "https://www.turfoo.fr/chevaux/{horse_name_slug}/"
+      enabled: true
+      weight: 0.9
+      type: "galop_trot"
+
+    - name: "zeturf"
+      url: "https://www.zeturf.fr"
+      search_url: "https://www.zeturf.fr/fr/chevaux/fiche/{horse_name_slug}"
+      enabled: true
+      weight: 0.85
+      type: "galop_trot"
+
+    - name: "turfomania"
+      url: "https://www.turfomania.fr"
+      search_url: "https://www.turfomania.fr/cheval/{horse_name_slug}"
+      enabled: true
+      weight: 0.8
+      type: "galop_trot"
+
+    - name: "paris_turf"
+      url: "https://www.paris-turf.com"
+      search_url: "https://www.paris-turf.com/recherche?q={horse_name}"
+      enabled: false  # protégé anti-bot, désactivé par défaut
+      weight: 0.85
+      type: "galop_trot"
+
+  # Pronostics experts
+  pronostics:
+    - name: "geny_course"
+      url: "https://www.genycourse.com"
+      search_url: "https://www.genycourse.com/recherche?cheval={horse_name}"
+      enabled: true
+      weight: 0.75
+      type: "pronostic"
+
+    - name: "zone_turf"
+      url: "https://www.zone-turf.fr"
+      search_url: "https://www.zone-turf.fr/cheval/{horse_name_slug}.html"
+      enabled: true
+      weight: 0.70
+      type: "pronostic"
+
+  # Source LONAB (programme du jour)
+  lonab:
+    programme_url: "https://lonab.bf/programme-pmub"
+    base_url: "https://lonab.bf"
+    pronostics: []  # pas de site tiers LONAB fiable
+
 # --- Monte Carlo ---
 monte_carlo:
   n_simulations: 10000
