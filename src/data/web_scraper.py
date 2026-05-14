@@ -7,12 +7,13 @@ import logging
 import time
 import random
 import requests
-import google.generativeai as genai
 import os
 import json
 from bs4 import BeautifulSoup
 from fake_useragent import UserAgent
 from tenacity import retry, stop_after_attempt, wait_exponential
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class WebScraper:
     Utilise Gemini pour parser les pages complexes.
     """
 
-    PARSE_PROMPT = """
+    PARSE_PROMPT_TEMPLATE = """
     Analyse cette page web de courses hippiques et extrais les informations
     sur le cheval "{horse_name}". Retourne UNIQUEMENT un JSON valide :
 
@@ -61,12 +62,11 @@ class WebScraper:
         self.ua = UserAgent()
         self.sources = self._load_sources()
 
-        # Gemini pour parsing intelligent
         api_key = os.getenv("GEMINI_API_KEY")
-        genai.configure(api_key=api_key)
-        self.gemini = genai.GenerativeModel(
-            config.get("gemini", {}).get("model", "gemini-1.5-pro")
-        )
+        self.client = genai.Client(api_key=api_key)
+        self.model = config.get("gemini", {}).get("model", "gemini-2.5-flash")
+        self.max_tokens = config.get("gemini", {}).get("max_tokens", 8192)
+
         logger.info(f"✅ WebScraper initialisé — {len(self.sources)} sources")
 
     def _load_sources(self) -> list:
@@ -113,7 +113,7 @@ class WebScraper:
                 logger.debug(f"    Source {source['name']} échouée pour {horse_name}: {e}")
                 continue
 
-        # Fallback : recherche générale via Gemini web
+        # Fallback : recherche via Gemini
         return self._gemini_web_search(horse_name)
 
     @retry(stop=stop_after_attempt(2), wait=wait_exponential(min=2, max=8))
@@ -125,10 +125,9 @@ class WebScraper:
         response = requests.get(search_url, headers=headers, timeout=12)
         response.raise_for_status()
 
-        # Parser avec Gemini si la page est complexe
         page_text = BeautifulSoup(response.text, "lxml").get_text(
             separator="\n", strip=True
-        )[:3000]  # Limiter pour Gemini
+        )[:3000]
 
         if len(page_text) < 100:
             return None
@@ -137,12 +136,13 @@ class WebScraper:
 
     def _parse_with_gemini(self, page_text: str, horse_name: str) -> dict:
         """Utilise Gemini pour parser intelligemment le contenu d'une page."""
-        prompt = self.PARSE_PROMPT.format(horse_name=horse_name)
+        prompt = self.PARSE_PROMPT_TEMPLATE.format(horse_name=horse_name)
         full_prompt = f"{prompt}\n\nContenu de la page:\n{page_text}"
 
-        response = self.gemini.generate_content(
-            full_prompt,
-            generation_config=genai.types.GenerationConfig(
+        response = self.client.models.generate_content(
+            model=self.model,
+            contents=full_prompt,
+            config=types.GenerateContentConfig(
                 temperature=0.0,
                 max_output_tokens=1024
             )
@@ -154,13 +154,11 @@ class WebScraper:
             if raw.startswith("json"):
                 raw = raw[4:]
 
-        data = json.loads(raw)
-        return data
+        return json.loads(raw)
 
     def _gemini_web_search(self, horse_name: str) -> dict:
         """
         Fallback : demande à Gemini ses connaissances sur le cheval.
-        Utile pour les chevaux connus sur le circuit LONAB.
         """
         try:
             prompt = f"""
@@ -172,7 +170,14 @@ class WebScraper:
             Si tu ne connais pas ce cheval, retourne null pour chaque champ.
             Pas de texte hors JSON.
             """
-            response = self.gemini.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=1024
+                )
+            )
             raw = response.text.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
@@ -188,7 +193,6 @@ class WebScraper:
     def scrape_jockey(self, jockey_name: str) -> dict:
         """
         Récupère les statistiques d'un jockey.
-        Retourne : win_rate, place_rate, recent_form, specialty_distance
         """
         try:
             prompt = f"""
@@ -206,7 +210,14 @@ class WebScraper:
             }}
             Si inconnu, retourne null pour chaque champ. Pas de texte hors JSON.
             """
-            response = self.gemini.generate_content(prompt)
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=0.0,
+                    max_output_tokens=512
+                )
+            )
             raw = response.text.strip()
             if raw.startswith("```"):
                 raw = raw.split("```")[1]
