@@ -61,6 +61,17 @@ class HyperionPipeline:
         self.report_gen = ReportGenerator(self.config)
         self.telegram = TelegramBot(self.config)
 
+    @staticmethod
+    def _extract_all_horses(lonab_data: dict) -> list:
+        """
+        Retourne la liste plate de tous les chevaux issus de lonab_data.
+        Compatible avec le format {"races": [{"horses": [...]}]}.
+        """
+        horses = []
+        for race in lonab_data.get("races", []):
+            horses.extend(race.get("horses", []))
+        return horses
+
     def run(self, pdf_path: str = None) -> dict:
         """
         Lance le pipeline complet pour une journée de courses.
@@ -74,18 +85,20 @@ class HyperionPipeline:
 
             # 1a. Extraction PDF LONAB
             lonab_data = self.lonab.extract(pdf_path)
-            logger.info(f"  ✅ LONAB : {len(lonab_data.get('races', []))} courses extraites")
+            all_horses = self._extract_all_horses(lonab_data)
+            nb_races = len(lonab_data.get("races", []))
+            logger.info(f"  ✅ LONAB : {nb_races} course(s) extraite(s), {len(all_horses)} chevaux")
 
             # 1b. Cotes en temps réel (si activé)
             live_odds = {}
             if self.config["pipeline"]["run_web_intelligence"]:
-                live_odds = self.live_fetcher.fetch(lonab_data["horses"])
+                live_odds = self.live_fetcher.fetch(all_horses)
                 logger.info(f"  ✅ Cotes live : {len(live_odds)} chevaux mis à jour")
 
             # 1c. Historiques et pronostics web
             web_data = {}
             if self.config["pipeline"]["run_web_intelligence"]:
-                web_data = self.web_scraper.scrape(lonab_data["horses"])
+                web_data = self.web_scraper.scrape(all_horses)
                 logger.info(f"  ✅ Web : historiques récupérés pour {len(web_data)} chevaux")
 
             # ── ÉTAPE 2 : FUSION & ENRICHISSEMENT ────────────────────
@@ -113,7 +126,7 @@ class HyperionPipeline:
 
             if self.config["pipeline"]["run_hades"]:
                 validated = self.hades.filter(validated, live_odds)
-                logger.info(f"  ✅ HADES : filtrage terminé")
+                logger.info("  ✅ HADES : filtrage terminé")
 
             # ── ÉTAPE 5 : STRATÉGIE DE MISE ──────────────────────────
             logger.info("💰 Étape 5 : Stratégie de mise")
@@ -138,7 +151,8 @@ class HyperionPipeline:
             results = {
                 "status": "success",
                 "date": self.run_date,
-                "races": len(lonab_data.get("races", [])),
+                "races": nb_races,
+                "horses": len(all_horses),
                 "predictions": len(validated),
                 "bets": len(final_bets),
                 "report": report,
