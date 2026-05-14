@@ -7,11 +7,16 @@ import os
 import json
 import logging
 import requests
+from datetime import date
 from pathlib import Path
+from bs4 import BeautifulSoup
 from google import genai
 from google.genai import types
 
 logger = logging.getLogger(__name__)
+
+LONAB_PROGRAMME_URL = "https://lonab.bf/programme-pmub"
+LONAB_BASE_URL = "https://lonab.bf"
 
 
 class LONABAdapter:
@@ -72,7 +77,7 @@ class LONABAdapter:
     def extract(self, pdf_path: str = None) -> dict:
         """
         Extrait les données du PDF LONAB.
-        Si pdf_path est None, télécharge depuis l'URL configurée.
+        Si pdf_path est None, scrape et télécharge le PDF du jour.
         """
         if pdf_path is None:
             pdf_path = self._download_pdf()
@@ -80,13 +85,14 @@ class LONABAdapter:
         if not pdf_path or not Path(pdf_path).exists():
             raise FileNotFoundError(f"PDF LONAB introuvable : {pdf_path}")
 
-        # --- VÉRIFICATIONS DU FICHIER ---
+        # Vérification taille
         file_size = Path(pdf_path).stat().st_size
         logger.info(f"📦 Taille du PDF : {file_size} octets")
 
         if file_size == 0:
             raise ValueError(f"Le PDF téléchargé est vide (0 octet) : {pdf_path}")
 
+        # Vérification header PDF
         with open(pdf_path, "rb") as f:
             header = f.read(4)
         if header != b"%PDF":
@@ -98,19 +104,79 @@ class LONABAdapter:
         logger.info(f"📄 Extraction PDF : {pdf_path}")
         return self._extract_with_gemini(pdf_path)
 
-    def _download_pdf(self) -> str:
-        """Télécharge le PDF depuis l'URL LONAB configurée."""
-        url = os.getenv("LONAB_PDF_URL")
-        if not url:
-            raise ValueError("LONAB_PDF_URL manquant dans les variables d'environnement")
+    def _find_pdf_url_for_today(self) -> str:
+        """
+        Scrape la page des programmes LONAB et retourne
+        l'URL du PDF correspondant à la date du jour.
+        En cas d'échec, retourne le dernier PDF disponible.
+        """
+        today = date.today()
+        today_str = today.strftime("%d/%m/%Y")  # format affiché sur le site
+        today_day = today.strftime("%d")
+        today_month = today.strftime("%m")
+        today_year = today.strftime("%Y")
 
+        logger.info(f"🔍 Recherche du PDF du jour ({today_str}) sur {LONAB_PROGRAMME_URL}")
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "text/html,application/xhtml+xml,*/*",
+        }
+
+        try:
+            response = requests.get(LONAB_PROGRAMME_URL, headers=headers, timeout=15)
+            response.raise_for_status()
+        except Exception as e:
+            raise RuntimeError(f"Impossible de scraper la page LONAB : {e}")
+
+        soup = BeautifulSoup(response.text, "html.parser")
+
+        # Chercher tous les liens de téléchargement PDF
+        pdf_links = []
+        for a in soup.find_all("a", href=True):
+            href = a["href"]
+            if ".pdf" in href.lower():
+                full_url = href if href.startswith("http") else LONAB_BASE_URL + href
+                pdf_links.append((a.get_text(strip=True), full_url))
+
+        if not pdf_links:
+            raise RuntimeError("Aucun lien PDF trouvé sur la page LONAB")
+
+        logger.info(f"📋 {len(pdf_links)} PDF(s) trouvé(s) sur la page")
+
+        # Chercher le PDF du jour (format dans le nom de fichier : DD-MM-YYYY)
+        date_pattern = f"{today_day}-{today_month}-{today_year}"
+        for label, url in pdf_links:
+            if date_pattern in url:
+                logger.info(f"✅ PDF du jour trouvé : {url}")
+                return url
+
+        # Fallback : prendre le premier (le plus récent)
+        fallback_label, fallback_url = pdf_links[0]
+        logger.warning(
+            f"⚠️ PDF du {today_str} non trouvé — utilisation du plus récent : "
+            f"'{fallback_label}' → {fallback_url}"
+        )
+        return fallback_url
+
+    def _download_pdf(self) -> str:
+        """Scrape la page LONAB et télécharge le PDF du jour."""
         save_path = "data/raw/programme_lonab.pdf"
         os.makedirs("data/raw", exist_ok=True)
 
-        logger.info(f"⬇️ Téléchargement PDF : {url}")
+        # Récupérer l'URL du PDF dynamiquement
+        pdf_url = self._find_pdf_url_for_today()
+
+        logger.info(f"⬇️ Téléchargement PDF : {pdf_url}")
+
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+            "Accept": "application/pdf,*/*",
+            "Referer": LONAB_PROGRAMME_URL,
+        }
 
         try:
-            response = requests.get(url, timeout=30, stream=True)
+            response = requests.get(pdf_url, headers=headers, timeout=30)
             response.raise_for_status()
         except requests.exceptions.HTTPError as e:
             raise RuntimeError(f"Erreur HTTP lors du téléchargement du PDF : {e}")
@@ -119,15 +185,6 @@ class LONABAdapter:
         except requests.exceptions.Timeout:
             raise RuntimeError("Timeout lors du téléchargement du PDF LONAB")
 
-        # Vérifier le Content-Type
-        content_type = response.headers.get("Content-Type", "")
-        if "application/pdf" not in content_type and "octet-stream" not in content_type:
-            logger.warning(
-                f"⚠️ Content-Type inattendu : '{content_type}'. "
-                f"Le serveur ne renvoie peut-être pas un PDF."
-            )
-
-        # Écriture du fichier
         content = response.content
         if not content:
             raise ValueError("Le contenu téléchargé est vide (réponse sans body)")
@@ -143,7 +200,6 @@ class LONABAdapter:
     def _extract_with_gemini(self, pdf_path: str) -> dict:
         """Utilise Gemini Vision pour extraire les données du PDF."""
         try:
-            # Upload du PDF vers Gemini
             uploaded_file = self.client.files.upload(
                 file=pdf_path,
                 config=types.UploadFileConfig(mime_type="application/pdf")
