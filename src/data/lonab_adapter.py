@@ -7,8 +7,9 @@ import os
 import json
 import logging
 import requests
-import google.generativeai as genai
 from pathlib import Path
+from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
@@ -63,10 +64,9 @@ class LONABAdapter:
         api_key = os.getenv("GEMINI_API_KEY")
         if not api_key:
             raise ValueError("GEMINI_API_KEY manquant dans les variables d'environnement")
-        genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel(
-            config.get("gemini", {}).get("vision_model", "gemini-1.5-flash")
-        )
+        self.client = genai.Client(api_key=api_key)
+        self.vision_model = config.get("gemini", {}).get("vision_model", "gemini-2.5-flash")
+        self.max_tokens = config.get("gemini", {}).get("max_tokens", 8192)
         logger.info("✅ LONABAdapter initialisé avec Gemini Vision")
 
     def extract(self, pdf_path: str = None) -> dict:
@@ -106,16 +106,17 @@ class LONABAdapter:
         """Utilise Gemini Vision pour extraire les données du PDF."""
         try:
             # Upload du PDF vers Gemini
-            uploaded_file = genai.upload_file(
-                path=pdf_path,
-                mime_type="application/pdf"
+            uploaded_file = self.client.files.upload(
+                file=pdf_path,
+                config=types.UploadFileConfig(mime_type="application/pdf")
             )
 
-            response = self.model.generate_content(
-                [uploaded_file, self.EXTRACTION_PROMPT],
-                generation_config=genai.types.GenerationConfig(
+            response = self.client.models.generate_content(
+                model=self.vision_model,
+                contents=[uploaded_file, self.EXTRACTION_PROMPT],
+                config=types.GenerateContentConfig(
                     temperature=0.0,
-                    max_output_tokens=self.config.get("gemini", {}).get("max_tokens", 8192)
+                    max_output_tokens=self.max_tokens
                 )
             )
 
@@ -147,9 +148,7 @@ class LONABAdapter:
         """Ajoute des champs calculés à chaque cheval."""
         for race in data.get("races", []):
             for horse in race.get("horses", []):
-                # Calculer un score de forme basique depuis la chaîne form
                 horse["form_score"] = self._compute_form_score(horse.get("form", ""))
-                # Référence croisée course
                 horse["race_number"] = race.get("race_number")
                 horse["race_name"] = race.get("race_name")
                 horse["distance"] = race.get("distance")
