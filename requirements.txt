@@ -8,8 +8,8 @@ pyyaml==6.0.1
 requests==2.31.0
 httpx==0.27.0
 
-# --- Gemini AI (PDF Vision + LLM) ---
-google-generativeai==0.7.2
+# --- Gemini AI (extraction courses + rapports) ---
+google-genai==2.0.1
 
 # --- PDF Processing ---
 pymupdf==1.24.5
