@@ -80,6 +80,21 @@ class LONABAdapter:
         if not pdf_path or not Path(pdf_path).exists():
             raise FileNotFoundError(f"PDF LONAB introuvable : {pdf_path}")
 
+        # --- VÉRIFICATIONS DU FICHIER ---
+        file_size = Path(pdf_path).stat().st_size
+        logger.info(f"📦 Taille du PDF : {file_size} octets")
+
+        if file_size == 0:
+            raise ValueError(f"Le PDF téléchargé est vide (0 octet) : {pdf_path}")
+
+        with open(pdf_path, "rb") as f:
+            header = f.read(4)
+        if header != b"%PDF":
+            raise ValueError(
+                f"Le fichier n'est pas un PDF valide (header détecté : {header!r}). "
+                f"L'URL pointe peut-être vers une page HTML."
+            )
+
         logger.info(f"📄 Extraction PDF : {pdf_path}")
         return self._extract_with_gemini(pdf_path)
 
@@ -93,13 +108,36 @@ class LONABAdapter:
         os.makedirs("data/raw", exist_ok=True)
 
         logger.info(f"⬇️ Téléchargement PDF : {url}")
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
+
+        try:
+            response = requests.get(url, timeout=30, stream=True)
+            response.raise_for_status()
+        except requests.exceptions.HTTPError as e:
+            raise RuntimeError(f"Erreur HTTP lors du téléchargement du PDF : {e}")
+        except requests.exceptions.ConnectionError as e:
+            raise RuntimeError(f"Impossible de joindre l'URL LONAB : {e}")
+        except requests.exceptions.Timeout:
+            raise RuntimeError("Timeout lors du téléchargement du PDF LONAB")
+
+        # Vérifier le Content-Type
+        content_type = response.headers.get("Content-Type", "")
+        if "application/pdf" not in content_type and "octet-stream" not in content_type:
+            logger.warning(
+                f"⚠️ Content-Type inattendu : '{content_type}'. "
+                f"Le serveur ne renvoie peut-être pas un PDF."
+            )
+
+        # Écriture du fichier
+        content = response.content
+        if not content:
+            raise ValueError("Le contenu téléchargé est vide (réponse sans body)")
 
         with open(save_path, "wb") as f:
-            f.write(response.content)
+            f.write(content)
 
-        logger.info(f"✅ PDF téléchargé : {save_path}")
+        file_size = Path(save_path).stat().st_size
+        logger.info(f"✅ PDF téléchargé : {save_path} ({file_size} octets)")
+
         return save_path
 
     def _extract_with_gemini(self, pdf_path: str) -> dict:
