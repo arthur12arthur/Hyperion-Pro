@@ -11,18 +11,18 @@ system:
 
 # --- Gemini AI ---
 gemini:
-  model: "gemini-1.5-pro"
-  vision_model: "gemini-1.5-flash"
+  model: "gemini-2.5-flash"
+  vision_model: "gemini-2.5-flash"
   max_tokens: 8192
   temperature: 0.1
 
 # --- Pipeline ---
 pipeline:
-  run_web_intelligence: true      # Activer recherche web
-  run_sentiment: true             # Activer analyse sentiment
-  run_ml_ensemble: true           # Activer ML Ensemble
-  run_hades: true                 # Activer anti-pièges
-  min_confidence_score: 2         # Score min pour émettre un pronostic (1-3)
+  run_web_intelligence: true
+  run_sentiment: true
+  run_ml_ensemble: true
+  run_hades: true
+  min_confidence_score: 2
 
 # --- Monte Carlo ---
 monte_carlo:
@@ -32,32 +32,32 @@ monte_carlo:
 # --- ML Ensemble ---
 ml_ensemble:
   models: ["xgboost", "lightgbm", "random_forest"]
-  min_agreement: 2                # Nb modèles min en accord pour valider
+  min_agreement: 2
 
 # --- HADES ---
 hades:
-  odds_drop_threshold: 0.30       # Baisse de cote > 30% = alerte
-  odds_spike_threshold: 0.50      # Hausse de cote > 50% = alerte
-  min_runners: 5                  # Course annulée si moins de 5 partants
-  max_uncertainty_score: 0.75     # Score d'incertitude max toléré
+  odds_drop_threshold: 0.30
+  odds_spike_threshold: 0.50
+  min_runners: 5
+  max_uncertainty_score: 0.75
 
 # --- Kelly ---
 kelly:
-  fraction: 0.25                  # Kelly fractionnaire (25%)
-  max_bet_pct: 0.05               # Mise max = 5% de la bankroll
-  min_ev: 0.05                    # EV min pour recommander un pari
+  fraction: 0.25
+  max_bet_pct: 0.05
+  min_ev: 0.05
 
 # --- Telegram ---
 telegram:
   send_daily_report: true
   send_odds_alerts: true
-  odds_alert_threshold: 0.20      # Alerte si cote bouge de 20%
-  report_time: "07:00"            # Heure d'envoi du rapport
+  odds_alert_threshold: 0.20
+  report_time: "07:00"
 
 # --- Backtesting ---
 backtesting:
-  window_size: 30                 # Fenêtre walk-forward en jours
-  min_samples: 50                 # Échantillons min pour entraîner
+  window_size: 30
+  min_samples: 50
 
 # --- Logging ---
 logging:
