@@ -11,18 +11,19 @@ logger = logging.getLogger(__name__)
 class RiskManager:
     """
     Applique les limites de risque sur les mises calculees par Kelly.
-    - Chevaux 'clear' : mise normale
-    - Chevaux 'warning' : mise reduite de 50%
-    - Chevaux 'blocked' : exclus
+    - clear   : mise normale
+    - warning : mise reduite de 30% (releve de 50%)
+    - blocked : exclus
     """
 
     def __init__(self, config: dict):
-        self.config = config
-        kelly_cfg = config.get("kelly", {})
-        self.max_bet_pct   = kelly_cfg.get("max_bet_pct", 0.05)
-        self.max_bets_day  = 5
-        self.max_exposure  = 0.20   # Max 20% de la bankroll par jour
-        self.warning_ratio = 0.50   # Mise reduite a 50% pour les warnings
+        self.config      = config
+        kelly_cfg        = config.get("kelly", {})
+        self.max_bet_pct  = kelly_cfg.get("max_bet_pct", 0.05)
+        self.max_bets_day = 5
+        self.max_exposure = 0.20     # Max 20% bankroll/jour
+        self.warning_ratio = 0.70    # Mise a 70% pour les warnings
+        self.min_bet      = 50.0     # Mise minimum 50 FCFA
         logger.info("RiskManager initialise")
 
     def apply(self, bets: list) -> list:
@@ -31,13 +32,16 @@ class RiskManager:
 
         bankroll = self._load_bankroll()
 
-        # Accepter les paris valides OU les warnings EV positif
+        # Accepter : ev_positive + non blocked + (valide OU warning)
         eligible = [
             b for b in bets
             if b.get("ev_positive")
             and b.get("hades_status") != "blocked"
-            and (b.get("is_validated") or b.get("hades_status") == "warning")
         ]
+
+        if not eligible:
+            logger.info("  RiskManager : aucun pari eligible")
+            return []
 
         # Reduire la mise pour les warnings
         for b in eligible:
@@ -45,17 +49,16 @@ class RiskManager:
                 b["bet_amount"] = round(b.get("bet_amount", 0) * self.warning_ratio, 2)
                 b["bet_warning_reduced"] = True
 
-        # Trier par priorite et EV
+        # Trier : clear avant warning, puis par EV decroissant
         eligible.sort(key=lambda x: (
             x.get("hades_status") == "clear",
-            x.get("priority", "BASSE") == "HAUTE",
             x.get("ev", 0)
         ), reverse=True)
 
-        # Limiter le nombre de paris par jour
+        # Limiter le nombre de paris
         eligible = eligible[:self.max_bets_day]
 
-        # Verifier l'exposition totale
+        # Verifier exposition totale
         total_exposure = sum(b.get("bet_amount", 0) for b in eligible)
         max_allowed = bankroll * self.max_exposure
 
@@ -66,8 +69,8 @@ class RiskManager:
                 b["bet_amount_adjusted"] = True
             logger.info("  RiskManager : mises reduites (exposition max atteinte)")
 
-        # Exclure les mises trop petites (< 100 FCFA)
-        eligible = [b for b in eligible if b.get("bet_amount", 0) >= 100]
+        # Filtrer mise minimum
+        eligible = [b for b in eligible if b.get("bet_amount", 0) >= self.min_bet]
 
         logger.info(
             f"  RiskManager : {len(eligible)} paris approuves | "
