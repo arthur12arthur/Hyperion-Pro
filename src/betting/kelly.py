@@ -171,3 +171,4 @@ class KellyCriterion:
             f.write(str(new_amount))
         self.bankroll = new_amount
         logger.info(f"  Bankroll mise a jour : {new_amount:.0f} FCFA")
+    
