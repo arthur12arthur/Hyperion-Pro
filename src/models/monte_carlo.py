@@ -176,3 +176,4 @@ class MonteCarloModel:
         max_entropy = np.log2(len(probs_arr))
 
         return round(entropy / max_entropy if max_entropy > 0 else 1.0, 3)
+        
