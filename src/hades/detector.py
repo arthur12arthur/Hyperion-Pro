@@ -13,10 +13,7 @@ logger = logging.getLogger(__name__)
 class HADESDetector:
     """
     HADES — Hyperion Anomaly Detection & Expert System.
-    Filtre les prédictions en détectant :
-    - Favoris suspects, anomalies de marché, courses incertaines
-    - Chevaux avec données insuffisantes
-    Chaque cheval reçoit un statut : clear / warning / blocked
+    Statuts : clear / warning / blocked
     """
 
     def __init__(self, config: dict):
@@ -46,16 +43,14 @@ class HADESDetector:
                 filtered.extend(race_horses)
                 continue
 
-            # Filtre 2 : Incertitude de la course
+            # Filtre 2 : Incertitude de la course (warning seulement, pas block)
             uncertainty = self._compute_uncertainty(race_horses)
-            if uncertainty > self.max_uncertainty:
-                for h in race_horses:
-                    h.setdefault("hades_status", "warning")
-                    h["hades_uncertainty"] = uncertainty
+            for h in race_horses:
+                h["hades_uncertainty"] = uncertainty
 
-            # Filtres individuels
+            # Filtres individuels par cheval
             for horse in race_horses:
-                self._apply_horse_filters(horse, live_odds or {})
+                self._apply_horse_filters(horse, live_odds or {}, uncertainty)
 
             filtered.extend(race_horses)
 
@@ -65,23 +60,27 @@ class HADESDetector:
         logger.info(f"  HADES : {n_clear} clear | {n_warning} warning | {n_blocked} blocked")
         return filtered
 
-    def _apply_horse_filters(self, horse: dict, live_odds: dict):
+    def _apply_horse_filters(self, horse: dict, live_odds: dict, uncertainty: float):
         if horse.get("hades_status") == "blocked":
             return
 
         reasons = []
-        status = horse.get("hades_status", "clear")
+        status = "clear"
 
+        # Confiance MC insuffisante (1 etoile = warning, pas blocked)
         mc_conf = horse.get("mc_confidence", 1)
         if mc_conf < self.min_confidence:
-            reasons.append(f"Confiance MC insuffisante (etoiles={mc_conf})")
+            reasons.append(f"Confiance MC : {mc_conf} etoile(s)")
             status = "warning"
 
+        # Couverture donnees faible — seuil abaisse a 0.1
+        # (sans web_data ni live_odds, coverage = 0.2 — acceptable)
         coverage = horse.get("data_coverage", 1.0)
-        if coverage < 0.3:
+        if coverage < 0.10:
             reasons.append(f"Donnees insuffisantes ({coverage:.0%})")
             status = "warning"
 
+        # Anomalie cotes
         name = horse.get("horse_name", "")
         odds_data = live_odds.get(name, {})
         variation = odds_data.get("variation", 0.0)
@@ -89,22 +88,31 @@ class HADESDetector:
 
         if signal == "market_alert":
             reasons.append(f"Anomalie cotes : {variation*100:+.1f}%")
-            status = "warning"
+            if status == "clear":
+                status = "warning"
 
+        # Forte baisse de cote
         if variation <= -self.odds_drop_threshold:
             reasons.append(f"Cote en forte baisse ({variation*100:.1f}%)")
             if status == "clear":
                 status = "warning"
 
+        # Favori suspect : cote tres basse + donnees tres faibles
         odds_val = odds_data.get("odds") or horse.get("odds_lonab", 99)
-        if odds_val and odds_val < 1.5 and coverage < 0.5:
-            reasons.append(f"Favori suspect : cote={odds_val} + donnees faibles")
+        if odds_val and odds_val < 1.5 and coverage < 0.2:
+            reasons.append(f"Favori suspect : cote={odds_val} + donnees manquantes")
             status = "blocked"
 
+        # Score composite trop bas (seuil abaisse a 0.20)
         composite = horse.get("score_composite", 0.5)
-        if composite < 0.25:
+        if composite < 0.20:
             reasons.append(f"Score composite trop faible ({composite:.2f})")
             status = "blocked"
+
+        # Course tres incertaine : warning seulement
+        if uncertainty > self.max_uncertainty and status == "clear":
+            reasons.append(f"Course incertaine ({uncertainty:.2f})")
+            status = "warning"
 
         horse["hades_status"] = status
         horse["hades_reasons"] = reasons
@@ -122,7 +130,7 @@ class HADESDetector:
     def _compute_hades_score(self, horse: dict, variation: float, coverage: float) -> float:
         score = 1.0
         score -= abs(variation) * 0.3
-        score -= (1 - coverage) * 0.2
+        score -= max(0, (0.5 - coverage)) * 0.2
         score -= (3 - horse.get("mc_confidence", 2)) * 0.15
         return round(max(0.0, min(1.0, score)), 3)
 
@@ -134,3 +142,4 @@ class HADESDetector:
 
     def get_blocked_horses(self, predictions: list) -> list:
         return [h for h in predictions if h.get("hades_status") == "blocked"]
+    
